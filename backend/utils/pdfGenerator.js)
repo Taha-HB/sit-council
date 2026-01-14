@@ -1,0 +1,601 @@
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
+
+class PDFGenerator {
+    constructor() {
+        this.doc = null;
+        this.margin = 50;
+        this.pageWidth = 595.28; // A4 width in points
+        this.pageHeight = 841.89; // A4 height in points
+    }
+
+    /**
+     * Generate meeting minutes PDF
+     * @param {Object} meeting - Meeting data
+     * @param {Object} options - PDF options
+     * @returns {Promise<Buffer>} - PDF buffer
+     */
+    async generateMeetingMinutes(meeting, options = {}) {
+        return new Promise((resolve, reject) => {
+            try {
+                const doc = new PDFDocument({
+                    margin: this.margin,
+                    size: 'A4',
+                    font: 'Times-Roman',
+                    info: {
+                        Title: `SIT Meeting Minutes - ${meeting.title}`,
+                        Author: 'SIT Student Council',
+                        Subject: 'Official Meeting Minutes',
+                        Keywords: 'meeting, minutes, SIT, council',
+                        Creator: 'SIT Council Portal',
+                        CreationDate: new Date()
+                    }
+                });
+
+                this.doc = doc;
+                const chunks = [];
+
+                doc.on('data', chunk => chunks.push(chunk));
+                doc.on('end', () => resolve(Buffer.concat(chunks)));
+                doc.on('error', reject);
+
+                // Add header
+                this.addHeader(meeting);
+
+                // Add meeting details
+                this.addMeetingDetails(meeting);
+
+                // Add objectives
+                if (meeting.objective) {
+                    this.addSection('MEETING OBJECTIVES', meeting.objective);
+                }
+
+                // Add attendees
+                this.addAttendees(meeting.attendees || []);
+
+                // Add agenda items
+                if (meeting.agenda && meeting.agenda.length > 0) {
+                    this.addAgenda(meeting.agenda);
+                }
+
+                // Add minutes
+                if (meeting.minutes) {
+                    this.addMinutes(meeting.minutes);
+                }
+
+                // Add action items
+                if (meeting.minutes && meeting.minutes.actionItems) {
+                    this.addActionItems(meeting.minutes.actionItems);
+                }
+
+                // Add next meeting info
+                if (meeting.minutes && meeting.minutes.nextMeeting) {
+                    this.addNextMeeting(meeting.minutes.nextMeeting);
+                }
+
+                // Add signatures
+                this.addSignatures(meeting);
+
+                // Add footer
+                this.addFooter(meeting);
+
+                doc.end();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    /**
+     * Generate performance report PDF
+     * @param {Object} user - User data with performance
+     * @param {Array} meetings - User's meetings
+     * @returns {Promise<Buffer>} - PDF buffer
+     */
+    async generatePerformanceReport(user, meetings = []) {
+        return new Promise((resolve, reject) => {
+            try {
+                const doc = new PDFDocument({
+                    margin: this.margin,
+                    size: 'A4',
+                    font: 'Times-Roman'
+                });
+
+                this.doc = doc;
+                const chunks = [];
+
+                doc.on('data', chunk => chunks.push(chunk));
+                doc.on('end', () => resolve(Buffer.concat(chunks)));
+                doc.on('error', reject);
+
+                // Add header
+                doc.fontSize(24)
+                   .text('SIT STUDENT COUNCIL', { align: 'center' })
+                   .fontSize(18)
+                   .text('PERFORMANCE EVALUATION REPORT', { align: 'center' })
+                   .moveDown();
+
+                // Member Information
+                this.addSection('MEMBER INFORMATION', '');
+                doc.fontSize(12)
+                   .text(`Name: ${user.name}`)
+                   .text(`Role: ${user.role}`)
+                   .text(`Student ID: ${user.studentId || 'N/A'}`)
+                   .text(`Department: ${user.department || 'N/A'}`)
+                   .text(`Join Date: ${this.formatDate(user.joinDate)}`)
+                   .moveDown();
+
+                // Performance Summary
+                const performance = user.performance || {};
+                this.addSection('PERFORMANCE SUMMARY', '');
+
+                const stats = [
+                    ['Meetings Attended', performance.meetingsAttended || 0],
+                    ['Tasks Completed', performance.tasksCompleted || 0],
+                    ['Performance Rating', `${(performance.rating || 0).toFixed(1)}/5.0`],
+                    ['Current Streak', performance.streak || 0],
+                    ['Achievement Points', performance.points || 0]
+                ];
+
+                stats.forEach(([label, value]) => {
+                    doc.text(`${label}: ${value}`)
+                       .moveDown(0.5);
+                });
+
+                // Achievements
+                if (performance.achievements && performance.achievements.length > 0) {
+                    this.addSection('ACHIEVEMENTS', '');
+                    performance.achievements.forEach((achievement, index) => {
+                        doc.text(`${index + 1}. ${achievement}`)
+                           .moveDown(0.5);
+                    });
+                }
+
+                // Meeting History
+                if (meetings.length > 0) {
+                    doc.addPage();
+                    this.addSection('MEETING HISTORY', '');
+                    
+                    meetings.forEach((meeting, index) => {
+                        doc.fontSize(11)
+                           .text(`${index + 1}. ${meeting.title}`, { indent: 20 })
+                           .fontSize(10)
+                           .text(`Date: ${this.formatDate(meeting.date)} | Type: ${meeting.type} | Role: ${meeting.role || 'Attendee'}`, { indent: 40 })
+                           .moveDown(0.5);
+                    });
+                }
+
+                // Performance Chart (Text-based)
+                doc.addPage();
+                this.addSection('PERFORMANCE ANALYSIS', '');
+
+                // Add some analysis
+                const analysis = this.generatePerformanceAnalysis(user, meetings);
+                doc.text(analysis);
+
+                // Recommendations
+                this.addSection('RECOMMENDATIONS', '');
+                const recommendations = this.generateRecommendations(user);
+                doc.text(recommendations);
+
+                // Footer
+                const pageHeight = doc.page.height;
+                doc.fontSize(10)
+                   .text(`Report Generated: ${this.formatDate(new Date())}`, 50, pageHeight - 50)
+                   .text('Confidential - For Internal Use Only', { align: 'center' });
+
+                doc.end();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    /**
+     * Generate attendance sheet PDF
+     * @param {Object} meeting - Meeting data
+     * @param {Array} attendees - Attendee list
+     * @returns {Promise<Buffer>} - PDF buffer
+     */
+    async generateAttendanceSheet(meeting, attendees) {
+        return new Promise((resolve, reject) => {
+            try {
+                const doc = new PDFDocument({
+                    margin: this.margin,
+                    size: 'A4',
+                    font: 'Helvetica'
+                });
+
+                this.doc = doc;
+                const chunks = [];
+
+                doc.on('data', chunk => chunks.push(chunk));
+                doc.on('end', () => resolve(Buffer.concat(chunks)));
+                doc.on('error', reject);
+
+                // Header
+                doc.fontSize(20)
+                   .text('SIT STUDENT COUNCIL', { align: 'center' })
+                   .fontSize(16)
+                   .text('ATTENDANCE SHEET', { align: 'center' })
+                   .moveDown();
+
+                // Meeting Info
+                doc.fontSize(12)
+                   .text(`Meeting: ${meeting.title}`)
+                   .text(`Date: ${this.formatDate(meeting.date)}`)
+                   .text(`Time: ${meeting.startTime} - ${meeting.endTime}`)
+                   .text(`Location: ${meeting.location || 'TBD'}`)
+                   .moveDown();
+
+                // Attendance Table
+                const tableTop = doc.y;
+                const colWidths = [40, 200, 100, 100, 60];
+                
+                // Table Headers
+                doc.fontSize(10)
+                   .text('No.', 50, tableTop)
+                   .text('Name', 50 + colWidths[0], tableTop)
+                   .text('Role', 50 + colWidths[0] + colWidths[1], tableTop)
+                   .text('Signature', 50 + colWidths[0] + colWidths[1] + colWidths[2], tableTop)
+                   .text('Time In', 50 + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], tableTop);
+
+                // Draw header line
+                doc.moveTo(50, tableTop + 15)
+                   .lineTo(50 + colWidths.reduce((a, b) => a + b, 0), tableTop + 15)
+                   .stroke();
+
+                // Table Rows
+                attendees.forEach((attendee, index) => {
+                    const y = tableTop + 20 + (index * 30);
+                    
+                    // Row background for better readability
+                    if (index % 2 === 0) {
+                        doc.rect(50, y - 5, colWidths.reduce((a, b) => a + b, 0), 30)
+                           .fill('#f8f9fa');
+                    }
+
+                    doc.fontSize(9)
+                       .fillColor('#000000')
+                       .text((index + 1).toString(), 50, y, { width: colWidths[0] - 5 })
+                       .text(attendee.name, 50 + colWidths[0], y, { width: colWidths[1] - 5 })
+                       .text(attendee.role, 50 + colWidths[0] + colWidths[1], y, { width: colWidths[2] - 5 })
+                       .text('', 50 + colWidths[0] + colWidths[1] + colWidths[2], y, { width: colWidths[3] - 5 }) // Space for signature
+                       .text(attendee.time || '', 50 + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], y, { width: colWidths[4] - 5 });
+
+                    // Draw signature line
+                    doc.moveTo(50 + colWidths[0] + colWidths[1] + colWidths[2], y + 15)
+                       .lineTo(50 + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] - 10, y + 15)
+                       .strokeColor('#cccccc')
+                       .stroke();
+                });
+
+                // Summary at the bottom
+                const totalAttendees = attendees.length;
+                const present = attendees.filter(a => a.status === 'present').length;
+                const absent = attendees.filter(a => a.status === 'absent').length;
+                const late = attendees.filter(a => a.status === 'late').length;
+
+                const summaryY = tableTop + 20 + (attendees.length * 30) + 20;
+                
+                doc.fontSize(11)
+                   .text('SUMMARY:', 50, summaryY)
+                   .text(`Total: ${totalAttendees} | Present: ${present} | Absent: ${absent} | Late: ${late}`, { indent: 20 })
+                   .moveDown();
+
+                // Approval section
+                doc.moveDown(2)
+                   .text('Verified by:')
+                   .moveDown(3)
+                   .text('___________________________')
+                   .text('Secretary, SIT Student Council');
+
+                doc.end();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    // Helper Methods
+    addHeader(meeting) {
+        const doc = this.doc;
+        
+        // SBC Logo placeholder
+        doc.fontSize(24)
+           .text('SIT STUDENT COUNCIL', { align: 'center' })
+           .fontSize(18)
+           .text('OFFICIAL MEETING MINUTES', { align: 'center' })
+           .moveDown();
+    }
+
+    addMeetingDetails(meeting) {
+        const doc = this.doc;
+        
+        doc.fontSize(14)
+           .text('MEETING DETAILS', { underline: true })
+           .moveDown(0.5);
+
+        doc.fontSize(12)
+           .text(`Title: ${meeting.title}`)
+           .text(`Date: ${this.formatDate(meeting.date)}`)
+           .text(`Time: ${meeting.startTime} - ${meeting.endTime}`)
+           .text(`Type: ${meeting.type.charAt(0).toUpperCase() + meeting.type.slice(1)}`)
+           .text(`Location: ${meeting.location || 'Not specified'}`)
+           .text(`Chairperson: ${meeting.chairperson?.name || 'Not specified'}`)
+           .text(`Minutes Taker: ${meeting.minutesTaker?.name || 'Not specified'}`)
+           .moveDown();
+    }
+
+    addSection(title, content) {
+        const doc = this.doc;
+        
+        // Check if we need a new page
+        if (doc.y > this.pageHeight - 100) {
+            doc.addPage();
+        }
+
+        doc.fontSize(14)
+           .text(title, { underline: true })
+           .moveDown(0.5);
+
+        if (content) {
+            doc.fontSize(12)
+               .text(content)
+               .moveDown();
+        }
+    }
+
+    addAttendees(attendees) {
+        if (attendees.length === 0) return;
+        
+        this.addSection('ATTENDEES', '');
+        
+        const doc = this.doc;
+        attendees.forEach((attendee, index) => {
+            const status = attendee.status ? attendee.status.charAt(0).toUpperCase() + attendee.status.slice(1) : 'Pending';
+            doc.fontSize(12)
+               .text(`${index + 1}. ${attendee.name} - ${attendee.role} (${status})`)
+               .moveDown(0.5);
+        });
+        doc.moveDown();
+    }
+
+    addAgenda(agendaItems) {
+        this.addSection('AGENDA', '');
+        
+        const doc = this.doc;
+        agendaItems.forEach((item, index) => {
+            doc.fontSize(12)
+               .text(`${index + 1}. ${item.title}`, { indent: 20 })
+               .fontSize(10)
+               .text(`Presenter: ${item.presenter || 'N/A'} | Duration: ${item.duration || 15} mins`, { indent: 40 });
+            
+            if (item.description) {
+                doc.text(`Description: ${item.description}`, { indent: 40 });
+            }
+            doc.moveDown(0.5);
+        });
+        doc.moveDown();
+    }
+
+    addMinutes(minutes) {
+        if (!minutes) return;
+        
+        this.addSection('MEETING MINUTES', '');
+        
+        const doc = this.doc;
+        
+        if (minutes.summary) {
+            doc.fontSize(12)
+               .text('Summary:', { underline: true })
+               .moveDown(0.5)
+               .text(minutes.summary)
+               .moveDown();
+        }
+
+        if (minutes.decisions && minutes.decisions.length > 0) {
+            doc.fontSize(12)
+               .text('Decisions Made:', { underline: true })
+               .moveDown(0.5);
+            
+            minutes.decisions.forEach((decision, index) => {
+                doc.text(`${index + 1}. ${decision}`)
+                   .moveDown(0.5);
+            });
+            doc.moveDown();
+        }
+    }
+
+    addActionItems(actionItems) {
+        if (!actionItems || actionItems.length === 0) return;
+        
+        this.addSection('ACTION ITEMS', '');
+        
+        const doc = this.doc;
+        const tableTop = doc.y;
+        const colWidths = [200, 100, 80, 80];
+        
+        // Table Headers
+        doc.fontSize(10)
+           .text('Task', 50, tableTop)
+           .text('Assignee', 50 + colWidths[0], tableTop)
+           .text('Deadline', 50 + colWidths[0] + colWidths[1], tableTop)
+           .text('Status', 50 + colWidths[0] + colWidths[1] + colWidths[2], tableTop);
+
+        // Draw header line
+        doc.moveTo(50, tableTop + 15)
+           .lineTo(50 + colWidths.reduce((a, b) => a + b, 0), tableTop + 15)
+           .stroke();
+
+        // Table Rows
+        actionItems.forEach((item, index) => {
+            const y = tableTop + 20 + (index * 25);
+            
+            // Alternate row background
+            if (index % 2 === 0) {
+                doc.rect(50, y - 5, colWidths.reduce((a, b) => a + b, 0), 25)
+                   .fill('#f8f9fa');
+            }
+
+            doc.fontSize(9)
+               .fillColor('#000000')
+               .text(item.task.substring(0, 40) + (item.task.length > 40 ? '...' : ''), 50, y, { width: colWidths[0] - 5 })
+               .text(item.assignee?.name || 'Unassigned', 50 + colWidths[0], y, { width: colWidths[1] - 5 })
+               .text(this.formatDate(item.deadline) || 'N/A', 50 + colWidths[0] + colWidths[1], y, { width: colWidths[2] - 5 })
+               .text(item.status.charAt(0).toUpperCase() + item.status.slice(1), 50 + colWidths[0] + colWidths[1] + colWidths[2], y, { width: colWidths[3] - 5 });
+        });
+
+        doc.moveDown((actionItems.length * 25) / 25 + 2);
+    }
+
+    addNextMeeting(nextMeeting) {
+        if (!nextMeeting) return;
+        
+        this.addSection('NEXT MEETING', '');
+        
+        const doc = this.doc;
+        doc.fontSize(12)
+           .text(`Date: ${this.formatDate(nextMeeting.date) || 'To be determined'}`)
+           .text(`Time: ${nextMeeting.time || 'To be determined'}`)
+           .text(`Location: ${nextMeeting.location || 'To be determined'}`)
+           .moveDown();
+
+        if (nextMeeting.agenda) {
+            doc.text('Proposed Agenda:')
+               .moveDown(0.5)
+               .text(nextMeeting.agenda, { indent: 20 });
+        }
+    }
+
+    addSignatures(meeting) {
+        const doc = this.doc;
+        
+        // Add new page if needed
+        if (doc.y > this.pageHeight - 150) {
+            doc.addPage();
+        }
+
+        doc.moveDown(2)
+           .fontSize(12)
+           .text('APPROVALS', { underline: true })
+           .moveDown(3);
+
+        // Prepared by
+        doc.text('Prepared by:')
+           .moveDown(3)
+           .text('___________________________')
+           .text(meeting.minutesTaker?.name || 'Secretary')
+           .text(meeting.minutesTaker?.role || 'SIT Student Council')
+           .moveDown(2);
+
+        // Approved by
+        doc.text('Approved by:')
+           .moveDown(3)
+           .text('___________________________')
+           .text(meeting.chairperson?.name || 'Chairperson')
+           .text(meeting.chairperson?.role || 'SIT Student Council');
+    }
+
+    addFooter(meeting) {
+        const doc = this.doc;
+        const pageHeight = doc.page.height;
+        
+        doc.fontSize(8)
+           .text(`Document ID: SIT-MIN-${meeting._id || Date.now()}`, 50, pageHeight - 50)
+           .text(`Generated: ${this.formatDate(new Date())}`, this.pageWidth - 200, pageHeight - 50, { align: 'right' })
+           .text(`Page ${doc.page.number}`, this.pageWidth / 2, pageHeight - 50, { align: 'center' });
+    }
+
+    formatDate(date) {
+        if (!date) return 'N/A';
+        const d = new Date(date);
+        return d.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+    }
+
+    generatePerformanceAnalysis(user, meetings) {
+        const performance = user.performance || {};
+        
+        let analysis = `Performance analysis for ${user.name} (${user.role}):\n\n`;
+        
+        // Meeting attendance
+        const totalMeetings = meetings.length;
+        const attended = performance.meetingsAttended || 0;
+        const attendanceRate = totalMeetings > 0 ? (attended / totalMeetings * 100).toFixed(1) : 0;
+        
+        analysis += `Meeting Attendance: ${attendanceRate}% (${attended}/${totalMeetings} meetings)\n`;
+        
+        // Task completion
+        const completedTasks = performance.tasksCompleted || 0;
+        analysis += `Tasks Completed: ${completedTasks}\n`;
+        
+        // Performance rating
+        const rating = performance.rating || 0;
+        analysis += `Performance Rating: ${rating.toFixed(1)}/5.0\n`;
+        
+        // Achievements
+        const achievements = performance.achievements || [];
+        if (achievements.length > 0) {
+            analysis += `\nAchievements: ${achievements.join(', ')}\n`;
+        }
+        
+        // Recommendations based on performance
+        if (rating >= 4.5) {
+            analysis += '\nStatus: Outstanding Performance - Keep up the excellent work!';
+        } else if (rating >= 4.0) {
+            analysis += '\nStatus: Good Performance - Continue the good work!';
+        } else if (rating >= 3.0) {
+            analysis += '\nStatus: Satisfactory Performance - Room for improvement in some areas.';
+        } else {
+            analysis += '\nStatus: Needs Improvement - Focus on increasing participation and task completion.';
+        }
+        
+        return analysis;
+    }
+
+    generateRecommendations(user) {
+        const performance = user.performance || {};
+        const rating = performance.rating || 0;
+        
+        let recommendations = 'Recommendations:\n\n';
+        
+        if (rating < 3.0) {
+            recommendations += '1. Increase meeting attendance and active participation\n';
+            recommendations += '2. Take on more responsibilities and action items\n';
+            recommendations += '3. Seek mentorship from senior council members\n';
+            recommendations += '4. Attend council training sessions\n';
+        } else if (rating < 4.0) {
+            recommendations += '1. Continue consistent meeting attendance\n';
+            recommendations += '2. Take initiative in meetings and discussions\n';
+            recommendations += '3. Complete assigned tasks ahead of deadlines\n';
+            recommendations += '4. Mentor newer council members\n';
+        } else {
+            recommendations += '1. Consider taking on leadership roles\n';
+            recommendations += '2. Mentor and train other council members\n';
+            recommendations += '3. Lead special projects or committees\n';
+            recommendations += '4. Share best practices with the council\n';
+        }
+        
+        return recommendations;
+    }
+
+    /**
+     * Save PDF to file (for testing/debugging)
+     * @param {Buffer} pdfBuffer - PDF buffer
+     * @param {String} filename - Output filename
+     */
+    async saveToFile(pdfBuffer, filename) {
+        const outputPath = path.join(__dirname, '../output', filename);
+        await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+        await fs.promises.writeFile(outputPath, pdfBuffer);
+        console.log(`PDF saved to: ${outputPath}`);
+        return outputPath;
+    }
+}
+
+module.exports = PDFGenerator;
